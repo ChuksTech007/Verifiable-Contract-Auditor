@@ -13,7 +13,7 @@
     "@anthropic-ai/sdk": "^0.105.0",
     "@google/generative-ai": "^0.24.1",
     "dotenv": "^17.4.2",
-    "next": "15.3.3",
+    "next": "15.3.9",
     "openai": "^6.44.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"

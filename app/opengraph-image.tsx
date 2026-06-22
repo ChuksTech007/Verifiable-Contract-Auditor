@@ -90,7 +90,15 @@ export default function OGImage() {
             fontWeight: "600",
           }}
         >
-          <span style={{ fontSize: "18px" }}>●</span>
+          <div
+            style={{
+              width: "12px",
+              height: "12px",
+              borderRadius: "50%",
+              background: "#10b981",
+              flexShrink: 0,
+            }}
+          />
           Verified via 0G Compute (TEE)
         </div>
       </div>
