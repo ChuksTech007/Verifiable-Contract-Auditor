@@ -89,6 +89,7 @@ export default function Home() {
   const [code, setCode] = useState("");
   const [findings, setFindings] = useState<Finding[] | null>(null);
   const [verified, setVerified] = useState(false);
+  const [txHash, setTxHash] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -98,6 +99,7 @@ export default function Home() {
     setError(null);
     setFindings(null);
     setVerified(false);
+    setTxHash(null);
 
     try {
       const res = await fetch("/api/audit", {
@@ -112,6 +114,7 @@ export default function Home() {
       }
       setFindings(data.findings ?? []);
       setVerified(data.verified === true);
+      setTxHash(data.txHash ?? null);
     } catch {
       setError("Network error — could not reach the audit API");
     } finally {
@@ -352,6 +355,45 @@ export default function Home() {
                 </p>
               </div>
             </div>
+
+            {/* On-chain verification */}
+            {txHash && (
+              <div className="mt-3 rounded-xl border border-emerald-500/20 bg-emerald-950/10 px-5 py-5">
+                <div className="flex items-start gap-3">
+                  <div className="shrink-0 p-2.5 rounded-xl bg-emerald-500/15 text-emerald-400 mt-0.5">
+                    <IconShield className="w-5 h-5" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-semibold text-emerald-300 text-sm mb-1">
+                      Verify this audit
+                    </p>
+                    <p className="text-gray-500 text-xs leading-relaxed mb-4">
+                      This audit was settled on-chain. Anyone can verify it
+                      independently.
+                    </p>
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <span
+                        title={txHash}
+                        className="font-mono text-xs text-gray-300 bg-white/5 border border-white/8 rounded-lg px-3 py-1.5 cursor-default select-all"
+                      >
+                        {txHash.slice(0, 6)}…{txHash.slice(-4)}
+                      </span>
+                      <a
+                        href={`https://chainscan-galileo.0g.ai/tx/${txHash}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-400 hover:text-emerald-300 transition-colors"
+                      >
+                        View on 0G Explorer
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" />
+                        </svg>
+                      </a>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </section>
       )}

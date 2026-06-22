@@ -3,8 +3,13 @@ import { createZGComputeNetworkBroker } from "@0gfoundation/0g-compute-ts-sdk";
 import OpenAI from "openai";
 import { NextRequest, NextResponse } from "next/server";
 
-const RPC_URL   = "https://evmrpc-testnet.0g.ai";
-const LEDGER_CA = "0xE70830508dAc0A97e6c087c75f402f9Be669E406";
+const RPC_URL      = "https://evmrpc-testnet.0g.ai";
+const LEDGER_CA    = "0xE70830508dAc0A97e6c087c75f402f9Be669E406";
+const INFERENCE_CA = "0xa79F4c8311FF93C06b8CfB403690cc987c93F91E";
+
+const BALANCE_UPDATED_ABI = [
+  "event BalanceUpdated(address indexed user, address indexed provider, uint256 amount, uint256 pendingRefund)",
+];
 
 const SYSTEM_PROMPT = `You are an expert smart contract security auditor specializing in Solidity.
 Analyze the provided code and return a JSON object matching this shape exactly:
@@ -104,6 +109,31 @@ export async function POST(req: NextRequest) {
   } catch {
     // TEE signature fetch failed — findings are still valid, badge won't show
   }
+  console.log("[0G Audit] processResponse result:", teeVerified);
+
+  // Query the inference contract for the most recent BalanceUpdated event
+  // for this (user, provider) pair — emitted on fund transfer or provider settlement.
+  let txHash: string | null = null;
+  try {
+    const inferenceContract = new Contract(INFERENCE_CA, BALANCE_UPDATED_ABI, provider);
+    const currentBlock = await provider.getBlockNumber();
+    const fromBlock    = Math.max(0, currentBlock - 5000);
+
+    const filter = inferenceContract.filters.BalanceUpdated(wallet.address, providerAddress);
+    const events = await inferenceContract.queryFilter(filter, fromBlock, "latest");
+
+    console.log("[0G Audit] BalanceUpdated events found:", events.length);
+    events.forEach((e, i) =>
+      console.log(`  [${i}] block=${e.blockNumber} tx=${e.transactionHash}`)
+    );
+
+    if (events.length > 0) {
+      txHash = events[events.length - 1].transactionHash;
+      console.log("[0G Audit] Using tx hash:", txHash);
+    }
+  } catch (err) {
+    console.log("[0G Audit] Could not fetch BalanceUpdated events:", err);
+  }
 
   const raw = responseText.trim()
     .replace(/^```(?:json)?\n?/, "")
@@ -111,7 +141,11 @@ export async function POST(req: NextRequest) {
 
   try {
     const parsed = JSON.parse(raw);
-    return NextResponse.json({ ...parsed, verified: teeVerified === true });
+    return NextResponse.json({
+      ...parsed,
+      verified: teeVerified === true,
+      txHash,
+    });
   } catch {
     return NextResponse.json(
       { error: "Could not parse model response", raw: responseText },
