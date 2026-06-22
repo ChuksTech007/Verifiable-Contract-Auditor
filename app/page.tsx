@@ -149,19 +149,18 @@ export default function Home() {
         const data = await res.json();
 
         if (!res.ok) {
-          setError(data.error ?? "Failed to reach 0G explorer");
+          if (data.error === "not_found") {
+            setError("Contract not found. Try pasting the source code directly instead.");
+          } else {
+            setError(data.error ?? "Contract not found. Try pasting the source code directly instead.");
+          }
           setLoading(false);
           setFetchingSource(false);
           return;
         }
 
-        const rawSource: string = data?.result?.[0]?.SourceCode ?? "";
-
-        if (
-          data.status !== "1" ||
-          !rawSource.trim() ||
-          rawSource === "Contract source code not verified"
-        ) {
+        const rawSource: string = data.sourceCode ?? "";
+        if (!rawSource.trim()) {
           setError("Contract source not verified on 0G explorer");
           setLoading(false);
           setFetchingSource(false);
@@ -171,7 +170,7 @@ export default function Home() {
         sourceCode = extractSource(rawSource);
         setCode(sourceCode);
       } catch {
-        setError("Failed to reach 0G explorer — try again or paste the source directly");
+        setError("Contract not found. Try pasting the source code directly instead.");
         setLoading(false);
         setFetchingSource(false);
         return;
@@ -223,7 +222,7 @@ export default function Home() {
         {/* ambient glow */}
         <div
           aria-hidden
-          className="hero-glow pointer-events-none absolute top-[-80px] left-1/2 -translate-x-1/2 w-[700px] h-[340px] rounded-full"
+          className="hero-glow pointer-events-none absolute -top-20 left-1/2 -translate-x-1/2 w-175 h-85 rounded-full"
         />
 
         <div className="relative max-w-2xl mx-auto text-center">
