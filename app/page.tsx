@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 type Severity = "high" | "medium" | "low";
+type Mode = "paste" | "address";
 
 interface Finding {
   severity: Severity;
@@ -85,13 +86,43 @@ const HOW_IT_WORKS = [
   },
 ];
 
+function extractSource(raw: string): string {
+  // Standard JSON Input wrapped in extra braces: {{ ... }}
+  if (raw.startsWith("{{")) {
+    try {
+      const inner = JSON.parse(raw.slice(1, -1));
+      const files = Object.values(inner.sources ?? {}) as { content: string }[];
+      const combined = files.map((f) => f.content ?? "").join("\n\n");
+      if (combined.trim()) return combined;
+    } catch { /* fall through */ }
+  }
+  // Standard JSON Input: { "sources": { ... } }
+  if (raw.startsWith("{")) {
+    try {
+      const inner = JSON.parse(raw);
+      const files = Object.values(inner.sources ?? {}) as { content: string }[];
+      const combined = files.map((f) => f.content ?? "").join("\n\n");
+      if (combined.trim()) return combined;
+    } catch { /* fall through */ }
+  }
+  return raw;
+}
+
 export default function Home() {
+  const [mode, setMode] = useState<Mode>("paste");
   const [code, setCode] = useState("");
+  const [contractAddress, setContractAddress] = useState("");
   const [findings, setFindings] = useState<Finding[] | null>(null);
   const [verified, setVerified] = useState(false);
   const [txHash, setTxHash] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [fetchingSource, setFetchingSource] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  function switchMode(m: Mode) {
+    setMode(m);
+    setError(null);
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -101,11 +132,58 @@ export default function Home() {
     setVerified(false);
     setTxHash(null);
 
+    let sourceCode = code;
+
+    if (mode === "address") {
+      const addr = contractAddress.trim();
+
+      if (!/^0x[0-9a-fA-F]{40}$/i.test(addr)) {
+        setError("Enter a valid contract address (0x followed by 40 hex characters)");
+        setLoading(false);
+        return;
+      }
+
+      setFetchingSource(true);
+      try {
+        const res = await fetch(`/api/source?address=${addr}`);
+        const data = await res.json();
+
+        if (!res.ok) {
+          setError(data.error ?? "Failed to reach 0G explorer");
+          setLoading(false);
+          setFetchingSource(false);
+          return;
+        }
+
+        const rawSource: string = data?.result?.[0]?.SourceCode ?? "";
+
+        if (
+          data.status !== "1" ||
+          !rawSource.trim() ||
+          rawSource === "Contract source code not verified"
+        ) {
+          setError("Contract source not verified on 0G explorer");
+          setLoading(false);
+          setFetchingSource(false);
+          return;
+        }
+
+        sourceCode = extractSource(rawSource);
+        setCode(sourceCode);
+      } catch {
+        setError("Failed to reach 0G explorer — try again or paste the source directly");
+        setLoading(false);
+        setFetchingSource(false);
+        return;
+      }
+      setFetchingSource(false);
+    }
+
     try {
       const res = await fetch("/api/audit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code }),
+        body: JSON.stringify({ code: sourceCode }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -121,6 +199,9 @@ export default function Home() {
       setLoading(false);
     }
   }
+
+  const canSubmit =
+    !loading && (mode === "paste" ? code.trim().length > 0 : contractAddress.trim().length > 0);
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -217,26 +298,64 @@ export default function Home() {
             </div>
 
             <form onSubmit={handleSubmit} className="p-5 flex flex-col gap-4">
-              <textarea
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
-                placeholder="Paste your Solidity contract source code here..."
-                rows={16}
-                className="w-full rounded-lg border border-white/[0.07] bg-[#060810] text-gray-200 font-mono text-sm px-4 py-3 resize-y placeholder-gray-700 focus:outline-none focus:ring-1 focus:ring-emerald-500/40 focus:border-emerald-500/30 transition-colors duration-200"
-              />
+
+              {/* ── Mode tabs ── */}
+              <div className="flex gap-1 p-1 rounded-lg bg-white/[0.03] border border-white/[0.06] self-start">
+                {(["paste", "address"] as const).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => switchMode(m)}
+                    className={`px-3.5 py-1.5 rounded-md text-xs font-semibold transition-all duration-150 ${
+                      mode === m
+                        ? "bg-white/[0.09] text-white shadow-sm"
+                        : "text-gray-500 hover:text-gray-300"
+                    }`}
+                  >
+                    {m === "paste" ? "Paste Code" : "Contract Address"}
+                  </button>
+                ))}
+              </div>
+
+              {/* ── Source input ── */}
+              {mode === "paste" ? (
+                <textarea
+                  value={code}
+                  onChange={(e) => setCode(e.target.value)}
+                  placeholder="Paste your Solidity contract source code here..."
+                  rows={16}
+                  className="w-full rounded-lg border border-white/[0.07] bg-[#060810] text-gray-200 font-mono text-sm px-4 py-3 resize-y placeholder-gray-700 focus:outline-none focus:ring-1 focus:ring-emerald-500/40 focus:border-emerald-500/30 transition-colors duration-200"
+                />
+              ) : (
+                <div className="flex flex-col gap-2">
+                  <input
+                    type="text"
+                    value={contractAddress}
+                    onChange={(e) => setContractAddress(e.target.value)}
+                    placeholder="0x1234...abcd"
+                    spellCheck={false}
+                    className="w-full rounded-lg border border-white/[0.07] bg-[#060810] text-gray-200 font-mono text-sm px-4 py-3 placeholder-gray-700 focus:outline-none focus:ring-1 focus:ring-emerald-500/40 focus:border-emerald-500/30 transition-colors duration-200"
+                  />
+                  <p className="text-gray-600 text-xs leading-relaxed">
+                    Source code is fetched from the 0G Explorer. The contract must be verified on-chain.
+                  </p>
+                </div>
+              )}
+
+              {/* ── Footer row ── */}
               <div className="flex items-center justify-between gap-4 flex-wrap">
                 <p className="text-gray-700 text-xs">
                   Processed through 0G Compute's decentralized TEE nodes
                 </p>
                 <button
                   type="submit"
-                  disabled={!code.trim() || loading}
+                  disabled={!canSubmit}
                   className="shrink-0 inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-500 active:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors duration-150"
                 >
                   {loading ? (
                     <>
                       <IconSpinner />
-                      Auditing…
+                      {fetchingSource ? "Fetching source…" : "Auditing…"}
                     </>
                   ) : (
                     <>
