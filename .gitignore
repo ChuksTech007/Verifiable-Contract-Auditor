@@ -23,6 +23,7 @@ build/
 wallets.json
 gen-wallet.mjs
 gen-wallets.mjs
+gen-logo.mjs
 sweep.mjs
 topup.mjs
 create-ledger.mjs
