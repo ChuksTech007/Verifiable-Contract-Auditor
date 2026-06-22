@@ -1,5 +1,8 @@
 import { JsonRpcProvider, Wallet, Contract, parseEther } from "ethers";
-import { createZGComputeNetworkBroker } from "@0gfoundation/0g-compute-ts-sdk";
+// Default import forces CJS resolution on Vercel — the ESM build re-exports from
+// a CJS bundle and Node.js can't resolve its named exports in an ESM context.
+import zgSdk from "@0gfoundation/0g-compute-ts-sdk";
+const { createZGComputeNetworkBroker } = zgSdk as typeof import("@0gfoundation/0g-compute-ts-sdk");
 import OpenAI from "openai";
 import { NextRequest, NextResponse } from "next/server";
 
