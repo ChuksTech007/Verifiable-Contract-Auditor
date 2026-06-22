@@ -1,23 +1,29 @@
 import type { NextConfig } from "next";
+import path from "path";
 
 const nextConfig: NextConfig = {
-  // Next.js 15 top-level key (replaces experimental.serverComponentsExternalPackages)
   serverExternalPackages: [
-    "@0gfoundation/0g-compute-ts-sdk",
     "@0glabs/0g-serving-broker",
     "ethers",
     "ffjavascript",
     "circomlibjs",
     "web-worker",
   ],
-  // Belt-and-suspenders: also set the deprecated key so Vercel's bundler
-  // recognises the packages as external under both Next.js 14 and 15 resolution.
-  experimental: {
-    serverComponentsExternalPackages: [
-      "@0gfoundation/0g-compute-ts-sdk",
-      "@0glabs/0g-serving-broker",
-      "ethers",
-    ],
+  webpack: (config, { isServer }) => {
+    if (isServer) {
+      // The 0G SDK's ESM build (index.mjs) re-exports named symbols from a CJS
+      // bundle — Node.js can't resolve named exports from CJS in an ESM import
+      // chain. Alias directly to the CJS entry so webpack always bundles the
+      // CommonJS version and never touches the broken ESM chain.
+      config.resolve.alias = {
+        ...config.resolve.alias,
+        "@0gfoundation/0g-compute-ts-sdk": path.resolve(
+          process.cwd(),
+          "node_modules/@0gfoundation/0g-compute-ts-sdk/lib.commonjs/index.js"
+        ),
+      };
+    }
+    return config;
   },
 };
 
