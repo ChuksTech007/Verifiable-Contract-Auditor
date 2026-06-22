@@ -1,0 +1,30 @@
+{
+  "name": "verifiable-contract-auditor",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "@0gfoundation/0g-compute-ts-sdk": "^0.8.4",
+    "@0glabs/0g-serving-broker": "^2.0.0",
+    "@anthropic-ai/sdk": "^0.105.0",
+    "@google/generative-ai": "^0.24.1",
+    "dotenv": "^17.4.2",
+    "next": "15.3.3",
+    "openai": "^6.44.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^22",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "ethers": "^6.13.1",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}
