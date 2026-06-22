@@ -18,9 +18,8 @@ const BALANCE_UPDATED_ABI = [
   "event BalanceUpdated(address indexed user, address indexed provider, uint256 amount, uint256 pendingRefund)",
 ];
 
-// Wrap Wallet so every tx the broker submits (including fee settlement) is recorded.
-// The broker calls wallet.sendTransaction() internally — we capture the hash here
-// without any extra RPC round-trip that could time out.
+// Intercept every on-chain transaction the broker submits so we can surface the
+// settlement tx hash without a separate (and timeout-prone) event scan.
 class TrackingWallet extends Wallet {
   txHashes: string[] = [];
   async sendTransaction(tx: TransactionRequest): Promise<TransactionResponse> {
@@ -101,22 +100,34 @@ export async function POST(req: NextRequest) {
   );
 
   const openai = new OpenAI({ baseURL: endpoint, apiKey: "placeholder" });
-  const completion = await openai.chat.completions.create(
-    {
-      model,
-      messages: [
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "user",   content: userContent },
-      ],
-    },
-    { headers: { ...billingHeaders } }
-  );
+
+  // .withResponse() gives us the raw HTTP response so we can read the
+  // ZG-Res-Key header — the completion object itself never carries headers.
+  const { data: completion, response: rawResponse } = await openai.chat.completions
+    .create(
+      {
+        model,
+        messages: [
+          { role: "system", content: SYSTEM_PROMPT },
+          { role: "user",   content: userContent },
+        ],
+      },
+      { headers: { ...billingHeaders } }
+    )
+    .withResponse();
 
   const responseText = completion.choices[0]?.message?.content ?? "";
-  const chatID =
-    (completion as unknown as { headers?: Record<string, string> }).headers?.[
-      "ZG-Res-Key"
-    ] ?? completion.id;
+
+  // ZG-Res-Key is 0G's response identifier required for TEE attestation.
+  // Header names in the Fetch API are lower-cased; try both casings.
+  const zgResKey =
+    rawResponse.headers.get("ZG-Res-Key") ??
+    rawResponse.headers.get("zg-res-key");
+  console.log("[0G Audit] ZG-Res-Key header:", zgResKey);
+
+  // Fall back to completion.id only if the header is missing (non-0G endpoint).
+  const chatID = zgResKey ?? completion.id;
+  console.log("[0G Audit] chatID for processResponse:", chatID, "| from header:", !!zgResKey);
 
   // Snapshot tx count before settlement so we can isolate the settlement hash.
   const txCountBeforeSettle = wallet.txHashes.length;
@@ -128,16 +139,17 @@ export async function POST(req: NextRequest) {
       chatID,
       JSON.stringify(completion.usage)
     );
-  } catch {
+  } catch (err) {
     // TEE signature fetch failed — findings are still valid, badge won't show
+    console.log("[0G Audit] processResponse threw:", err);
   }
   console.log("[0G Audit] processResponse result:", teeVerified);
-  console.log("[0G Audit] All wallet tx hashes captured:", wallet.txHashes);
+  console.log("[0G Audit] All wallet tx hashes:", wallet.txHashes);
 
-  // Primary: tx hash submitted by the broker during processResponse (zero extra RPC calls).
+  // Primary: tx submitted by the broker during processResponse (zero extra RPC calls).
   const settlementTxs = wallet.txHashes.slice(txCountBeforeSettle);
   let txHash: string | null = settlementTxs.at(-1) ?? null;
-  console.log("[0G Audit] Settlement tx hashes from processResponse:", settlementTxs);
+  console.log("[0G Audit] Settlement txs from processResponse:", settlementTxs);
 
   // Fallback: event scan — short range (100 blocks ≈ 50 s) to avoid RPC timeout.
   if (!txHash) {
@@ -147,7 +159,7 @@ export async function POST(req: NextRequest) {
       const fromBlock    = Math.max(0, currentBlock - 100);
       const filter = inferenceContract.filters.BalanceUpdated(wallet.address, providerAddress);
       const events = await inferenceContract.queryFilter(filter, fromBlock, "latest");
-      console.log("[0G Audit] Fallback event scan — BalanceUpdated events found:", events.length);
+      console.log("[0G Audit] Fallback event scan — events found:", events.length);
       if (events.length > 0) txHash = events[events.length - 1].transactionHash;
     } catch (err) {
       console.log("[0G Audit] Fallback event scan failed:", err);
