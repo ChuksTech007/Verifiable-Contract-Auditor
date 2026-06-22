@@ -5,44 +5,52 @@ const EXPLORERS = [
   "https://chainscan.0g.ai",         // mainnet
 ];
 
-async function fetchSource(baseUrl: string, address: string): Promise<{
-  sourceCode: string | null;
-  error: string | null;
-}> {
-  const url = `${baseUrl}/api?module=contract&action=getsourcecode&address=${address}`;
-
-  let res: Response;
-  try {
-    res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
-  } catch {
-    return { sourceCode: null, error: "timeout" };
-  }
-
+async function safeJsonFetch(url: string): Promise<unknown> {
+  const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
   const text = await res.text();
-
-  // Explorer returned HTML (404 page, maintenance page, etc.) — not a JSON API response
   if (text.trimStart().startsWith("<")) {
-    return { sourceCode: null, error: "html" };
+    throw new Error("HTML response — endpoint does not exist");
   }
+  return JSON.parse(text);
+}
 
-  let data: { status?: string; result?: { SourceCode?: string }[] };
+async function fetchSourceFromExplorer(
+  baseUrl: string,
+  address: string
+): Promise<string | null> {
+  // ── 1. Blockscout v2 native API (primary — works on 0G's chainscan) ──
   try {
-    data = JSON.parse(text);
+    const data = (await safeJsonFetch(`${baseUrl}/api/v2/smart-contracts/${address}`)) as {
+      source_code?: string;
+      additional_sources?: { file_name: string; source_code: string }[];
+    };
+
+    if (data?.source_code?.trim()) {
+      const parts: string[] = [data.source_code];
+      for (const extra of data.additional_sources ?? []) {
+        parts.push(`// ${extra.file_name}\n${extra.source_code}`);
+      }
+      return parts.join("\n\n");
+    }
   } catch {
-    return { sourceCode: null, error: "invalid_json" };
+    // v2 not available or contract not verified — try Etherscan-compatible API
   }
 
-  const rawSource = data?.result?.[0]?.SourceCode ?? "";
+  // ── 2. Etherscan-compatible API (fallback) ──
+  try {
+    const data = (await safeJsonFetch(
+      `${baseUrl}/api?module=contract&action=getsourcecode&address=${address}`
+    )) as { status?: string; result?: { SourceCode?: string }[] };
 
-  if (
-    data.status !== "1" ||
-    !rawSource.trim() ||
-    rawSource === "Contract source code not verified"
-  ) {
-    return { sourceCode: null, error: "unverified" };
+    const raw = data?.result?.[0]?.SourceCode ?? "";
+    if (data?.status === "1" && raw.trim() && raw !== "Contract source code not verified") {
+      return raw;
+    }
+  } catch {
+    // not available
   }
 
-  return { sourceCode: rawSource, error: null };
+  return null;
 }
 
 export async function GET(req: NextRequest) {
@@ -53,21 +61,11 @@ export async function GET(req: NextRequest) {
   }
 
   for (const baseUrl of EXPLORERS) {
-    const { sourceCode, error } = await fetchSource(baseUrl, address);
-
+    const sourceCode = await fetchSourceFromExplorer(baseUrl, address);
     if (sourceCode) {
       return NextResponse.json({ sourceCode, explorer: baseUrl });
     }
-
-    // Only continue to next explorer for errors that mean "not here"
-    if (error === "unverified" || error === "html" || error === "timeout" || error === "invalid_json") {
-      continue;
-    }
   }
 
-  // Both explorers exhausted
-  return NextResponse.json(
-    { error: "not_found" },
-    { status: 404 }
-  );
+  return NextResponse.json({ error: "not_found" }, { status: 404 });
 }
